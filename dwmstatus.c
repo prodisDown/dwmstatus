@@ -15,7 +15,7 @@
 #include <X11/Xlib.h>
 
 /* macros */
-#define LENGTH(X) (sizeof X / sizeof X[0])
+#define LENGTH(X) (sizeof(X) / sizeof(X[0]))
 
 /* definitions */
 typedef int FD;
@@ -121,48 +121,48 @@ getbattery(char *strbuf, struct getbattery *ct)
 	/* BAT: present */
 	if ((fd_present = openat(ct->fd_base, ct->n_present, O_RDONLY)) < 0)
 		goto error;
-	readfile(co, sizeof co, fd_present);
+	readfile(co, sizeof(co), fd_present);
 	close(fd_present);
 	if (co[0] != '1') {
 		sprintf(strbuf, "not present");
 		return strbuf;
 	}
-	memset(co, 0, sizeof co);
+	memset(co, 0, sizeof(co));
 
 	/* BAT: designed capacity */
 	if ((fd_descap = openat(ct->fd_base, ct->n_descap, O_RDONLY)) < 0)
 		goto error;
-	readfile(co, sizeof co, fd_descap);
+	readfile(co, sizeof(co), fd_descap);
 	close(fd_descap);
 	if (co == NULL || co[0] == '\0') {
 		goto error;
 	}
 	sscanf(co, "%d", &descap);
-	memset(co, 0, sizeof co);
+	memset(co, 0, sizeof(co));
 
 	if ((fd_remcap = openat(ct->fd_base, ct->n_remcap, O_RDONLY)) < 0)
 		goto error;
-	readfile(co, sizeof co, fd_remcap);
+	readfile(co, sizeof(co), fd_remcap);
 	close(fd_remcap);
 	if (co == NULL || co[0] == '\0') {
 		goto error;
 	}
 	sscanf(co, "%d", &remcap);
-	memset(co, 0, sizeof co);
+	memset(co, 0, sizeof(co));
 
 	if ((fd_pownow = openat(ct->fd_base, ct->n_pownow, O_RDONLY)) < 0)
 		goto error;
-	readfile(co, sizeof co, fd_pownow);
+	readfile(co, sizeof(co), fd_pownow);
 	close(fd_pownow);
 	if (co == NULL || co[0] == '\0') {
 		goto error;
 	}
 	sscanf(co, "%d", &pownow);
-	memset(co, 0, sizeof co);
+	memset(co, 0, sizeof(co));
 
 	if ((fd_status = openat(ct->fd_base, ct->n_status, O_RDONLY)) < 0)
 		goto error;
-	readfile(co, sizeof co, fd_status);
+	readfile(co, sizeof(co), fd_status);
 	close(fd_status);
 	if (!strncmp(co, "Discharging", 11)) {
 		status = '-';
@@ -221,7 +221,7 @@ gettemperature(char *strbuf, struct gettemperature *ct)
 	/* Open and close sensor each call */
 	if ((fd_sensor = openat(ct->fd_hwmon, ct->n_sensor, O_RDONLY)) < 0)
 		goto error;
-	readfile(co, sizeof co, fd_sensor);
+	readfile(co, sizeof(co), fd_sensor);
 	close(fd_sensor);
 	if (co == NULL)
 		goto error;
