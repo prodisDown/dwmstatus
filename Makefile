@@ -17,7 +17,11 @@ options:
 	@echo CC $<
 	@${CC} -c ${CFLAGS} $<
 
-${OBJ}: config.mk
+config.h:
+	@echo cp config.def.h $@
+	@cp config.def.h $@
+
+${OBJ}: config.mk config.h
 
 ${NAME}: ${OBJ}
 	@echo CC -o $@
