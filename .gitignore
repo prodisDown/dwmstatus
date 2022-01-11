@@ -1,0 +1,9 @@
+*
+# Track this:
+!.gitignore
+!LICENSE
+!README
+!Makefile
+!config.mk
+!dwmstatus.c
+!config.def.h
