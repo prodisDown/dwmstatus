@@ -1,0 +1,11 @@
+*
+!.gitignore
+!README
+!LICENSE
+
+!Makefile
+!config.mk
+
+!config.def.h
+!config.h
+!dwmstatus.c

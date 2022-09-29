@@ -1,0 +1,25 @@
+dwmstatus
+Fork of the original dwmstatus ( https://git.suckless.org/dwmstatus/ ) status
+monitor. It renames root X window, then dwm reads its name and prints it in
+their status bar.
+
+By default it outputs something like this:
+
+ 36°C | - 69.9 5.12 W | 7 121221 162733+0300 
+
+It means:
+
+• CPU temperature in °C (it searches for hwmon directory in provided by
+config path /sys/devices/platform/<modulename>, /sys/devices/platform/coretemp.0
+by default, then it opens first finded hwmon<num> folder and then checks
+provided sensor file)
+
+• battery status ('-' is discharging, '+' is charging, '?' is unknown), current
+charge (relative to designed capacity, not last full capacity a.k.a. 'degraded'
+capacity) in percents, current power consumption in watts.
+
+• day of week, day of month + month + year, hours + minutes + seconds + timezone
+
+
+dwmstatus updates time each second and each two seconds all other stuff.
+It also autocorrects timeouts to update exactly when a new second begins.
