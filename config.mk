@@ -1,7 +1,7 @@
 NAME = dwmstatus
-VERSION = 1.0
-
-# Customize below to fit your system
+VERSION = 1.1
+NICE_LVL = 9
+#DEBUGFLAGS = -DDEBUG_NORENAME -DDEBUG_STDOUT
 
 # paths
 PREFIX = ~/.local
@@ -15,15 +15,15 @@ INCS = -I. -I/usr/include -I${X11INC}
 LIBS = -L/usr/lib -lc -L${X11LIB} -lX11
 
 # flags
-CPPFLAGS = -DVERSION=\"${VERSION}\" -D_DEFAULT_SOURCE
-CFLAGS = -std=c17 -pedantic -Wall -Os ${INCS} ${CPPFLAGS}
+CPPFLAGS = ${DEBUGFLAGS} \
+	   -DVERSION=\"${VERSION}\" \
+	   -DNAME=\"${NAME}\" \
+	   -DNICE_LVL=${NICE_LVL} \
+	   -D_DEFAULT_SOURCE
+CFLAGS = -std=c11 -pedantic -Wall -Os ${INCS} ${CPPFLAGS}
 #LDFLAGS = -g ${LIBS}
 LDFLAGS = -s ${LIBS}
 
-# Solaris
-#CFLAGS = -fast ${INCS} -DVERSION=\"${VERSION}\"
-#LDFLAGS = ${LIBS}
-
 # compiler and linker
-CC = cc
+CC = gcc
 

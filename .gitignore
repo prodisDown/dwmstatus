@@ -8,4 +8,6 @@
 
 !config.def.h
 !config.h
-!dwmstatus.c
+!main.c
+!util.c
+!util.h

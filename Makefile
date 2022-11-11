@@ -2,7 +2,7 @@
 
 include config.mk
 
-SRC = ${NAME}.c
+SRC = main.c util.c
 OBJ = ${SRC:.c=.o}
 
 all: options ${NAME}
@@ -17,7 +17,7 @@ options:
 	@echo CC $<
 	@${CC} -c ${CFLAGS} $<
 
-${OBJ}: config.mk
+${OBJ}: config.mk config.h util.h
 
 ${NAME}: ${OBJ}
 	@echo CC -o $@
