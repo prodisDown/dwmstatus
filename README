@@ -1,25 +1,22 @@
 dwmstatus
-Fork of the original dwmstatus ( https://git.suckless.org/dwmstatus/ ) status
-monitor. It renames root X window, then dwm reads its name and prints it in
-their status bar.
+=========
 
-By default it outputs something like this:
+Fork of the original dwmstatus ( https://git.suckless.org/dwmstatus/ ) status bar.
+It outputs its data by renaming root X window, which dwm then prints in its own bar.
 
- 36°C | - 69.9 5.12 W | 7 121221 162733+0300 
+It output looks something like that (but you can change it, of course):
 
-It means:
+	 wlan0: 192.168.0.115 (0.0 b/42.0K) | 36°C | - 69.9 5.12 | 6 121122 100000+0300 
 
-• CPU temperature in °C (it searches for hwmon directory in provided by
-config path /sys/devices/platform/<modulename>, /sys/devices/platform/coretemp.0
-by default, then it opens first finded hwmon<num> folder and then checks
-provided sensor file)
+In its default configuration it can do this list of things.
+* Monitors specific network interface, outputs IP(v4) assigned to it, and counts average
+ rate of bytes (rx/tx) send through this interface.
+* CPU temperature in degree Celsius.
+* Battery status (`-` is discharging, `+` is charging, `?` is anything else),
+ its current capacity (in percentage from full designed capacity, thus it'l never be 100),
+ and current power draw in watts.
+* Calendar day-of-week, date (ddmmyy) and current time (HHMMSS) with timezone offset.
 
-• battery status ('-' is discharging, '+' is charging, '?' is unknown), current
-charge (relative to designed capacity, not last full capacity a.k.a. 'degraded'
-capacity) in percents, current power consumption in watts.
-
-• day of week, day of month + month + year, hours + minutes + seconds + timezone
-
-
-dwmstatus updates time each second and each two seconds all other stuff.
-It also autocorrects timeouts to update exactly when a new second begins.
+You are welcome to read, explore, edit and copy/fork this code. It was designed to be edited when
+ you want to change something or add new functionality just by reading sources and
+ editing config.h file.
