@@ -5,20 +5,28 @@
 #define _XOPEN_SOURCE 700
 #endif
 
-#include <stdlib.h>
-#include <stdarg.h>
-#include <string.h>
-#include <stdbool.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <limits.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <arpa/inet.h>
 #include <dirent.h>
-#include <strings.h>
-#include <sys/time.h>
-#include <time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <ifaddrs.h>
+#include <limits.h>
+#include <linux/if_link.h>
+#include <net/if.h>
+#include <netdb.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+
 #include <X11/Xlib.h>
 
 #include "util.h"
@@ -54,8 +62,8 @@ typedef union UpdateArg {
 
 typedef union UpdateCtx {
 	struct {
-		struct timespec last;
-		struct timespec next;
+		struct timespec last,
+				next;
 	};
 } UpdateCtx;
 
@@ -85,15 +93,25 @@ struct mktimes_arg {
 struct getbattery_arg {
 	const char *dir;
 	const char *n_present,
-	           *n_energy_design,
-	           *n_energy_now,
-	           *n_power_now,
-	           *n_status;
+		   *n_energy_design,
+		   *n_energy_now,
+		   *n_power_now,
+		   *n_status;
 	const char *(*status_txt);
 };
 
 struct getbattery_ctx {
 	int fd_dir;
+};
+
+struct getnetwork_arg {
+	const char *if_name;
+};
+
+struct getnetwork_ctx {
+	uint64_t last_rx,
+		 last_tx;
+	struct timespec last;
 };
 
 struct gettemperature_arg {
@@ -109,6 +127,7 @@ struct gettemperature_ctx {
 /* functions */
 ssize_t mktimes(char *restrict, size_t, void *, const Arg);
 ssize_t getbattery(char *restrict, size_t, void *, const Arg);
+ssize_t getnetwork(char *restrict, size_t, void *, const Arg);
 ssize_t gettemperature(char *restrict, size_t, void *, const Arg);
 static void *ecalloc(size_t, size_t);
 static void init_updates(void);
@@ -287,6 +306,122 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 
 	return (ssize_t)psize;
 error:
+	return -1;
+}
+
+ssize_t getnetwork(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
+{
+	struct getnetwork_arg *s = (struct getnetwork_arg *)arg.v;
+	struct getnetwork_ctx *c = (struct getnetwork_ctx *)ctx;
+	size_t cur=0;
+
+	struct ifaddrs *ial=NULL;
+	struct ifaddrs *ia_packet=NULL,
+		       *ia_inet=NULL;
+
+	/* interface device name */
+	{
+		int rc=snprintf(buf, buflen, "%s: ", s->if_name);
+		if ((size_t)rc >= buflen) goto error;
+		cur += (size_t)rc;
+	}
+
+	if (0 > getifaddrs(&ial))
+		goto error;
+
+	struct ifaddrs *ia;
+	for(ia=ial; NULL!=ia; ia=ia->ifa_next) {
+		if (strcmp(s->if_name, ia->ifa_name)) continue;
+		if (NULL == ia->ifa_addr) continue;
+
+		switch(ia->ifa_addr->sa_family) {
+		case AF_PACKET:
+			ia_packet=ia;
+			break;
+		case AF_INET:
+			ia_inet=ia;
+			break;
+		}
+	}
+
+	/* not found link device */
+	if (!ia_packet) {
+		int rc=snprintf((buf+cur), (buflen-cur), "(null)");
+		if ((size_t)rc >= buflen-cur) goto error;
+		cur += (size_t)rc;
+		goto norm;
+	}
+
+	/* interface is down */
+	if (!(IFF_UP & ia_packet->ifa_flags)) {
+		int rc=snprintf((buf+cur), (buflen-cur), "down");
+		if ((size_t)rc >= buflen-cur) goto error;
+		cur += (size_t)rc;
+		goto norm;
+	}
+
+	/* IP-address */
+	if (!ia_inet || !ia_inet->ifa_addr) {
+		int rc=snprintf((buf+cur), (buflen-cur), "no-ip");
+		if ((size_t)rc >= buflen-cur) goto error;
+		cur += (size_t)rc;
+	} else {
+		struct sockaddr_in *s_in = (struct sockaddr_in *)(ia_inet->ifa_addr);
+		char *ip = inet_ntoa(s_in->sin_addr);
+		int rc=snprintf((buf+cur), (buflen-cur), "%s", ip);
+		if ((size_t)rc >= buflen-cur) goto error;
+		cur += (size_t)rc;
+	}
+
+	/* rx/tx rates */
+	if (ia_packet->ifa_data) {
+		struct rtnl_link_stats *stats = ia_packet->ifa_data;
+		uint32_t diff_rx, diff_tx;
+		double tdiv;
+
+		diff_rx = stats->rx_bytes - c->last_rx;
+		diff_tx = stats->tx_bytes - c->last_tx;
+		c->last_rx = stats->rx_bytes;
+		c->last_tx = stats->tx_bytes;
+
+		{
+			struct timespec lag, now;
+			clock_gettime(CLOCK_REALTIME, &now);
+			timespec_sub(&lag, &now, &c->last);
+			memcpy(&c->last, &now, sizeof(c->last));
+			if (0 > lag.tv_sec) goto error;
+			tdiv = (double)lag.tv_sec + (double)lag.tv_nsec/1e9;
+			if (0.1 >= tdiv) goto norm;
+		}
+
+		const double threshold = 100.0;
+		const char prefix[] = {'b','K','M','G','T'};
+		uint8_t prx, ptx;
+		double rx, tx;
+
+		for(prx=0, rx=(double)diff_rx / tdiv;
+				COUNT(prefix)-1 > prx && rx > threshold;
+				++prx, rx/=1024.0);
+		for(ptx=0, tx=(double)diff_tx / tdiv;
+				COUNT(prefix)-1 > ptx && tx > threshold;
+				++ptx, tx/=1024.0);
+
+		int rc=snprintf((buf+cur), (buflen-cur),
+				" (%-4.1f%c/%-4.1f%c)",
+				rx, prefix[prx],
+				tx, prefix[ptx]);
+		if ((size_t)rc >= buflen-cur) goto error;
+		cur += (size_t)rc;
+	}
+
+norm:;
+	freeifaddrs(ial);
+	return (ssize_t)cur;
+
+error:;
+	if (ial)
+		freeifaddrs(ial);
+	buf[0] = '\0';
 	return -1;
 }
 

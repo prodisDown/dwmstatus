@@ -31,9 +31,14 @@ static const struct gettemperature_arg farg_temp_CPU = {
 	.n_sensor="temp1_input"
 };
 
+static const struct getnetwork_arg farg_network_wlan0 = {
+	.if_name = "wlan0"
+};
+
 
 
 static const Widget widget[] = {
+	{ getnetwork, WIDGET_BUFLEN*2, sizeof(struct getnetwork_ctx), {.v = &farg_network_wlan0} },
 	{ gettemperature, WIDGET_BUFLEN, sizeof(struct gettemperature_ctx), {.v = &farg_temp_CPU} },
 	{ getbattery, WIDGET_BUFLEN, sizeof(struct getbattery_ctx), {.v = &farg_power_BAT0} },
 	{ mktimes, WIDGET_BUFLEN, 0, {.v = &farg_wallclock_localtime} },
@@ -46,7 +51,7 @@ static const Update update[] = {
 
 static const short *(update_widgets[]) = {
 	/* negative-terminated */
-	(const short[]) {2, -1},
-	(const short[]) {0, 1, -1},
+	(const short[]) {3, -1},
+	(const short[]) {0, 1, 2, -1},
 };
 
