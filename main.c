@@ -14,6 +14,7 @@
 #include <linux/if_link.h>
 #include <net/if.h>
 #include <netdb.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,6 +23,8 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <time.h>
@@ -104,8 +107,16 @@ struct getbattery_ctx {
 	int fd_dir;
 };
 
+struct getdiskusage_arg {
+	int mode; /* 0: file size; 1: fs free; 2: fs used/total; */
+	const char *path;
+	const char *name; /* NULL: don't print name; else: use name */
+};
+
 struct getnetwork_arg {
+	bool view_rates;
 	const char *if_name;
+	const char *vi_name;
 };
 
 struct getnetwork_ctx {
@@ -127,18 +138,21 @@ struct gettemperature_ctx {
 /* functions */
 ssize_t mktimes(char *restrict, size_t, void *, const Arg);
 ssize_t getbattery(char *restrict, size_t, void *, const Arg);
+ssize_t getdiskusage(char *restrict, size_t, void *, const Arg);
 ssize_t getnetwork(char *restrict, size_t, void *, const Arg);
 ssize_t gettemperature(char *restrict, size_t, void *, const Arg);
 static void *ecalloc(size_t, size_t);
+static void exitnow_hndl(int);
 static void init_updates(void);
 static void init_widgets(void);
-static void update_status(void);
 static void push_status(const char *restrict);
+static void update_status(void);
 void die(enum ErrorNum);
 
 /* variables */
 static Display *dpy;
 static char *restrict status;
+static volatile int exitnow;
 
 /* configuration, allows nested code to use variables above */
 #include "config.h"
@@ -309,6 +323,71 @@ error:
 	return -1;
 }
 
+ssize_t getdiskusage(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
+{
+	struct getdiskusage_arg *s = (struct getdiskusage_arg *)arg.v;
+	(void)ctx;
+	const char unit[] = {'B','K','M','G','T'};
+	uint8_t u=0;
+	size_t cur=0;
+	if (!s->path) goto error;
+
+	if (s->name) {
+		int rc=snprintf((buf+cur), (buflen-cur), "%s: ", s->name);
+		if ((size_t)rc >= buflen-cur) goto error;
+		cur += (size_t)rc;
+	}
+
+	switch (s->mode) {
+	case 0:
+		;
+		struct stat st;
+		{
+			int rv=stat(s->path, &st);
+			if (0 > rv)
+				goto norm;
+		}
+		float fsz=(float)st.st_size;
+		for(u=0; fsz>=1000 && u<COUNT(unit)-1; ++u, fsz/=1024);
+		;
+		{
+			int rc=snprintf((buf+cur), (buflen-cur),
+					u>0?"%.1f%c":"%.0f",
+					fsz, unit[u]);
+			if ((size_t)rc >= buflen-cur) goto error;
+			cur += (size_t)rc;
+		}
+		break;
+	case 1:
+		;
+		struct statvfs stfs;
+		{
+			int rv=statvfs(s->path, &stfs);
+			if (0 > rv)
+				goto norm;
+		}
+		/* show disk space available for unprivileged users (like `df -h`)*/
+		float fssz_av=(float)stfs.f_frsize * (float)stfs.f_bavail;
+
+		for(u=0; fssz_av>=1000 && u<COUNT(unit)-1; ++u, fssz_av/=1024);
+		;
+		{
+			int rc=snprintf((buf+cur), (buflen-cur),
+					u>0?"%.1f%c":"%.0f",
+					fssz_av, unit[u]);
+			if ((size_t)rc >= buflen-cur) goto error;
+			cur += (size_t)rc;
+		}
+		break;
+	}
+
+norm:
+	return (ssize_t)cur;
+
+error:
+	return -1;
+}
+
 ssize_t getnetwork(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 {
 	struct getnetwork_arg *s = (struct getnetwork_arg *)arg.v;
@@ -321,7 +400,8 @@ ssize_t getnetwork(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 
 	/* interface device name */
 	{
-		int rc=snprintf(buf, buflen, "%s: ", s->if_name);
+		int rc=snprintf(buf, buflen, "%s:", s->vi_name != NULL ?
+				s->vi_name : s->if_name);
 		if ((size_t)rc >= buflen) goto error;
 		cur += (size_t)rc;
 	}
@@ -346,15 +426,12 @@ ssize_t getnetwork(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 
 	/* not found link device */
 	if (!ia_packet) {
-		int rc=snprintf((buf+cur), (buflen-cur), "(null)");
-		if ((size_t)rc >= buflen-cur) goto error;
-		cur += (size_t)rc;
 		goto norm;
 	}
 
 	/* interface is down */
 	if (!(IFF_UP & ia_packet->ifa_flags)) {
-		int rc=snprintf((buf+cur), (buflen-cur), "down");
+		int rc=snprintf((buf+cur), (buflen-cur), " down");
 		if ((size_t)rc >= buflen-cur) goto error;
 		cur += (size_t)rc;
 		goto norm;
@@ -362,22 +439,22 @@ ssize_t getnetwork(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 
 	/* IP-address */
 	if (!ia_inet || !ia_inet->ifa_addr) {
-		int rc=snprintf((buf+cur), (buflen-cur), "no-ip");
+		int rc=snprintf((buf+cur), (buflen-cur), " up");
 		if ((size_t)rc >= buflen-cur) goto error;
 		cur += (size_t)rc;
 	} else {
 		struct sockaddr_in *s_in = (struct sockaddr_in *)(ia_inet->ifa_addr);
 		char *ip = inet_ntoa(s_in->sin_addr);
-		int rc=snprintf((buf+cur), (buflen-cur), "%s", ip);
+		int rc=snprintf((buf+cur), (buflen-cur), " %s", ip);
 		if ((size_t)rc >= buflen-cur) goto error;
 		cur += (size_t)rc;
 	}
 
 	/* rx/tx rates */
-	if (ia_packet->ifa_data) {
+	if (s->view_rates && ia_packet->ifa_data) {
 		struct rtnl_link_stats *stats = ia_packet->ifa_data;
 		uint32_t diff_rx, diff_tx;
-		double tdiv;
+		uint32_t tdiv;
 
 		diff_rx = stats->rx_bytes - c->last_rx;
 		diff_tx = stats->tx_bytes - c->last_tx;
@@ -389,29 +466,36 @@ ssize_t getnetwork(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 			clock_gettime(CLOCK_REALTIME, &now);
 			timespec_sub(&lag, &now, &c->last);
 			memcpy(&c->last, &now, sizeof(c->last));
-			if (0 > lag.tv_sec) goto error;
-			tdiv = (double)lag.tv_sec + (double)lag.tv_nsec/1e9;
+			if (0 > lag.tv_sec) goto norm;
+			tdiv = (uint32_t)lag.tv_sec + (uint32_t)(lag.tv_nsec/1000000000);
 			if (0.1 >= tdiv) goto norm;
 		}
 
-		const double threshold = 100.0;
-		const char prefix[] = {'b','K','M','G','T'};
 		uint8_t prx, ptx;
-		double rx, tx;
+		uint32_t rx, tx;
+		for(prx=0, rx=diff_rx / tdiv;
+				rx >= 1024;
+				++prx, rx/=1024);
+		for(ptx=0, tx=diff_tx / tdiv;
+				tx >= 1024;
+				++ptx, tx/=1024);
 
-		for(prx=0, rx=(double)diff_rx / tdiv;
-				COUNT(prefix)-1 > prx && rx > threshold;
-				++prx, rx/=1024.0);
-		for(ptx=0, tx=(double)diff_tx / tdiv;
-				COUNT(prefix)-1 > ptx && tx > threshold;
-				++ptx, tx/=1024.0);
+		const char *rxfs, *txfs;
+		rxfs = diff_rx>0 ? " %x%x" : " ..";
+		txfs = diff_tx>0 ? " %x%x" : " ..";
 
-		int rc=snprintf((buf+cur), (buflen-cur),
-				" (%-4.1f%c/%-4.1f%c)",
-				rx, prefix[prx],
-				tx, prefix[ptx]);
-		if ((size_t)rc >= buflen-cur) goto error;
-		cur += (size_t)rc;
+		{
+			int rc=snprintf((buf+cur), (buflen-cur),
+					rxfs, (uint8_t)(rx/64), prx);
+			if ((size_t)rc >= buflen-cur) goto error;
+			cur += (size_t)rc;
+		}
+		{
+			int rc=snprintf((buf+cur), (buflen-cur),
+					txfs, (uint8_t)(tx/64), ptx);
+			if ((size_t)rc >= buflen-cur) goto error;
+			cur += (size_t)rc;
+		}
 	}
 
 norm:;
@@ -496,6 +580,11 @@ static void *ecalloc(size_t nmemb, size_t size)
 	if (!m)
 		die(ERR_PANIC);
 	return m;
+}
+
+static void exitnow_hndl(int signal)
+{
+	exitnow = signal;
 }
 
 static void init_updates(void) {
@@ -600,6 +689,13 @@ int main(void)
 
 /* Main loop */
 	struct timespec now;
+	exitnow = 0;
+	struct sigaction sa;
+	sa.sa_handler = exitnow_hndl;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGTERM, &sa, NULL);
+	sigaction(SIGHUP, &sa, NULL);
 loop_again:
 	;
 	/* default_lag := now + 60s */
@@ -652,7 +748,6 @@ loop_again:
 			default:
 				continue;
 			}
-//			DEBUG("u=%hd:next=% .2lld.% .9lld",u,up_ctx->next.tv_sec,up_ctx->next.tv_nsec);
 
 			clock_gettime(CLOCK_REALTIME, &now);
 		}
@@ -668,7 +763,6 @@ loop_again:
 			|| up_ctx->next.tv_nsec < closest.tv_nsec)
 			memcpy(&closest, &up_ctx->next, sizeof(up_ctx->next));
 	}
-//	DEBUG("closest=% .2lld.% .9lld",closest.tv_sec,closest.tv_nsec);
 
 	clock_gettime(CLOCK_REALTIME, &now);
 	{
@@ -676,16 +770,13 @@ loop_again:
 
 		timespec_sub(&diff, &closest, &now);
 		if (0 <= diff.tv_sec) {
-//			DEBUG("now: % .2lld.% .9lld", now.tv_sec, now.tv_nsec);
-//			DEBUG("nanosleep: % .2lld.% .9lld", diff.tv_sec, diff.tv_nsec);
 			nanosleep(&diff, NULL);
 		}
-
-//		DEBUG("------------------------------");
-		goto loop_again;
 	}
+	if (!exitnow)
+		goto loop_again;
 
-	/* unreachable */
+	/* Got SIGTERM, exit cleanly */
 	die(ERR_OK);
 }
 

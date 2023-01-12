@@ -21,7 +21,6 @@ CPPFLAGS = ${DEBUGFLAGS} \
 	   -DNICE_LVL=${NICE_LVL} \
 	   -D_DEFAULT_SOURCE
 CFLAGS = -std=c11 -pedantic -Wall -Os ${INCS} ${CPPFLAGS}
-#LDFLAGS = -g ${LIBS}
 LDFLAGS = -s ${LIBS}
 
 # compiler and linker
