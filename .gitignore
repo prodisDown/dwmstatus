@@ -1,13 +1,3 @@
-*
-!.gitignore
-!README
-!LICENSE
-
-!Makefile
-!config.mk
-
-!config.def.h
-!config.h
-!main.c
-!util.c
-!util.h
+config.h
+dwmstatus
+*.o
