@@ -13,11 +13,11 @@ static const struct getdiskusage_arg farg_fsavail_root = {
 };
 static const struct getbattery_arg farg_power_BAT0 = {
 	.dir="/sys/class/power_supply/BAT0",
-	.n_present="present",
-	.n_energy_design="energy_full_design",
-	.n_energy_now="energy_now",
-	.n_power_now="power_now",
-	.n_status="status",
+	.present="present",
+	.energy_max="energy_full_design",
+	.energy_now="energy_now",
+	.power_now="power_now",
+	.status="status",
 	.status_txt = (const char*[]) {
 	/* undefined   */ "?",
 	/* charging    */ "+",
@@ -26,7 +26,7 @@ static const struct getbattery_arg farg_power_BAT0 = {
 };
 static const struct gettemperature_arg farg_temp_CPU = {
 	.dir="/sys/devices/platform/coretemp.0",
-	.n_sensor="temp1_input"
+	.sensor="temp1_input"
 };
 static const struct getnetwork_arg farg_network_wlan0 = {
 	.if_name = "wlan0",
@@ -40,12 +40,13 @@ static const struct getnetwork_arg farg_network_wlan0_ap = {
 };
 
 static const Widget widget[] = {
-	{ getnetwork, WIDGET_BUFLEN*2, sizeof(struct getnetwork_ctx), {.v = &farg_network_wlan0_ap} },
-	{ getnetwork, WIDGET_BUFLEN*2, sizeof(struct getnetwork_ctx), {.v = &farg_network_wlan0} },
-	{ getdiskusage, WIDGET_BUFLEN, 0, {.v = &farg_fsavail_root} },
-	{ gettemperature, WIDGET_BUFLEN, sizeof(struct gettemperature_ctx), {.v = &farg_temp_CPU} },
-	{ getbattery, WIDGET_BUFLEN, sizeof(struct getbattery_ctx), {.v = &farg_power_BAT0} },
-	{ mktimes, WIDGET_BUFLEN, 0, {.v = &farg_wallclock_localtime} },
+	/* func, buflen, ctx_size, arg */
+	{ getnetwork, 2*WIDGET_BUFLEN, sizeof(struct getnetwork_ctx), {.v = &farg_network_wlan0_ap} },
+	{ getnetwork, 2*WIDGET_BUFLEN, sizeof(struct getnetwork_ctx), {.v = &farg_network_wlan0} },
+	{ getdiskusage, 1*WIDGET_BUFLEN, 0, {.v = &farg_fsavail_root} },
+	{ gettemperature, 1*WIDGET_BUFLEN, sizeof(struct gettemperature_ctx), {.v = &farg_temp_CPU} },
+	{ getbattery, 1*WIDGET_BUFLEN, sizeof(struct getbattery_ctx), {.v = &farg_power_BAT0} },
+	{ mktimes, 1*WIDGET_BUFLEN, 0, {.v = &farg_wallclock_localtime} },
 };
 static const Update update[] = {
 	{ UP_WALLCLOCK, {.wallclock={1, 0}} },

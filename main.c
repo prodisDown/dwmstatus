@@ -87,10 +87,12 @@ typedef struct Widget {
 
 /* functions */
 static void *ecalloc(size_t, size_t);
-static void exitnow_hndl(int);
 static void init_update(int, UpdateCtx **);
 static void init_widget(int, char **, void **);
+static void loop(void);
 static void push_status(const char *restrict);
+static void setup_signals(void);
+static void sighandle_exitnow(int);
 static void update_status(void);
 void die(enum ErrorNum);
 
@@ -99,6 +101,7 @@ void die(enum ErrorNum);
 static Display *dpy;
 #endif
 static char *restrict status;
+static struct timespec now;
 static volatile int exitnow;
 
 static UpdateCtx **update_ctx;
@@ -120,11 +123,6 @@ static void *ecalloc(size_t nmemb, size_t size)
 	void *m = calloc(nmemb, size);
 	if (m == NULL) die(ERR_PANIC);
 	return m;
-}
-
-static void exitnow_hndl(int signal)
-{
-	exitnow = signal;
 }
 
 static void init_update(int u, UpdateCtx **u_ctx)
@@ -206,6 +204,92 @@ void die(enum ErrorNum code)
 	exit(code);
 }
 
+static void sighandle_exitnow(int signal)
+{
+	exitnow = signal;
+}
+
+static void setup_signals(void)
+{
+	struct sigaction sa;
+
+	sa.sa_handler = sighandle_exitnow;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGTERM, &sa, NULL);
+	sigaction(SIGHUP, &sa, NULL);
+}
+
+static void loop(void)
+{
+	/* default_lag := now + 60s */
+	struct timespec default_lag = {.tv_sec=60, .tv_nsec=0};
+	struct timespec closest;
+
+	for(short u=0; COUNT(update)>u; ++u) {
+		const Update *up = &update[u];
+		UpdateCtx *u_ctx = update_ctx[u];
+		const short *u_wd = (const short *)update_widgets[u];
+
+		clock_gettime(CLOCK_REALTIME, &now);
+
+		/* diff := next - now */
+		{
+			struct timespec diff;
+			timespec_sub(&diff, &u_ctx->next, &now);
+			if (0 <= diff.tv_sec)
+				/* too early*/ continue;
+		}
+
+		memcpy(&u_ctx->last, &now, sizeof(now));
+		for(short w = *u_wd; -1 < w; w = *(++u_wd))
+		{
+			const Widget *wd = &widget[w];
+			void *w_ctx = widget_ctx[w];
+			char *w_buf = widget_buf[w];
+			(wd->func)(w_buf, wd->buflen, w_ctx, wd->arg);
+		}
+
+		switch(up->type) {
+		case UP_WALLCLOCK:
+			/* next := now + period - ((now - offset) % period) */
+			if (up->arg.wallclock.wait <= 1) {
+				u_ctx->next.tv_sec = now.tv_sec + 1;
+			} else {
+				struct timespec A = {0, 0};
+				A.tv_sec = now.tv_sec - up->arg.wallclock.offset;
+				A.tv_sec %= up->arg.wallclock.wait;
+				A.tv_sec = up->arg.wallclock.wait - A.tv_sec;
+				u_ctx->next.tv_sec = now.tv_sec + A.tv_sec;
+			}
+			u_ctx->next.tv_nsec = 0;
+			break;
+		default:
+			continue;
+		}
+	}
+
+	update_status();
+	push_status(status);
+
+	clock_gettime(CLOCK_REALTIME, &now);
+	timespec_add(&closest, &now, &default_lag); /* default wait value */
+	for(short u = 0; COUNT(update) > u; ++u) {
+		UpdateCtx *u_ctx = update_ctx[u];
+		if (u_ctx->next.tv_sec < closest.tv_sec
+		|| u_ctx->next.tv_nsec < closest.tv_nsec)
+			memcpy(&closest, &u_ctx->next, sizeof(u_ctx->next));
+	}
+
+	clock_gettime(CLOCK_REALTIME, &now);
+	{
+		struct timespec diff;
+		timespec_sub(&diff, &closest, &now);
+		if (0 <= diff.tv_sec)
+			nanosleep(&diff, NULL);
+	}
+}
+
 int main(void)
 {
 	/* updates initialization */
@@ -234,88 +318,16 @@ int main(void)
 	nice(NICE_LVL);
 #endif
 
-/* Main loop */
-	struct timespec now;
 	exitnow = 0;
-	struct sigaction sa;
-	sa.sa_handler = exitnow_hndl;
-	sigemptyset(&sa.sa_mask);
-	sigaction(SIGINT, &sa, NULL);
-	sigaction(SIGTERM, &sa, NULL);
-	sigaction(SIGHUP, &sa, NULL);
-loop_again:
-	;
-	/* default_lag := now + 60s */
-	struct timespec default_lag = {.tv_sec=60, .tv_nsec=0};
-	struct timespec closest;
+	setup_signals();
 
-	clock_gettime(CLOCK_REALTIME, &now);
-
-	for(short u=0; COUNT(update)>u; ++u) {
-		const Update up = update[u];
-		UpdateCtx *up_ctx = update_ctx[u];
-		const short *up_wid = (const short *)update_widgets[u];
-		struct timespec diff;
-
-		/* diff := next - now */
-		timespec_sub(&diff, &up_ctx->next, &now);
-
-		if (0 > diff.tv_sec) {
-			memcpy(&up_ctx->last, &now, sizeof(now));
-
-			for(short w=*up_wid; -1<w; w=*(++up_wid)) {
-				const Widget wg = widget[w];
-				void *wg_ctx = widget_ctx[w];
-				char *wg_buf = widget_buf[w];
-
-				(wg.func)(wg_buf, wg.buflen, wg_ctx, wg.arg);
-			}
-
-			switch(up.type) {
-			case UP_WALLCLOCK:
-				;
-				/* next := now + period - ((now - offset) % period) */
-				if (up.arg.wallclock.wait <= 1) {
-					up_ctx->next.tv_sec = now.tv_sec + 1;
-				} else {
-					struct timespec A = {0, 0};
-					A.tv_sec = now.tv_sec - up.arg.wallclock.offset;
-					A.tv_sec %= up.arg.wallclock.wait;
-					A.tv_sec = up.arg.wallclock.wait - A.tv_sec;
-					up_ctx->next.tv_sec = now.tv_sec + A.tv_sec;
-				}
-				up_ctx->next.tv_nsec = 0;
-				break;
-
-			default:
-				continue;
-			}
-
-			clock_gettime(CLOCK_REALTIME, &now);
-		}
-	}
-
-	update_status();
-	push_status(status);
-
-	timespec_add(&closest, &now, &default_lag); /* default wait value */
-	for(short u=0; COUNT(update)>u; ++u) {
-		UpdateCtx *up_ctx = update_ctx[u];
-		if (up_ctx->next.tv_sec < closest.tv_sec
-			|| up_ctx->next.tv_nsec < closest.tv_nsec)
-			memcpy(&closest, &up_ctx->next, sizeof(up_ctx->next));
-	}
-
-	clock_gettime(CLOCK_REALTIME, &now);
+	for(;;)
 	{
-		struct timespec diff;
-
-		timespec_sub(&diff, &closest, &now);
-		if (0 <= diff.tv_sec) nanosleep(&diff, NULL);
+		loop();
+		if (exitnow) goto sig_exitnow;
 	}
-	if (!exitnow)
-		goto loop_again;
 
+sig_exitnow:
 	/* Got SIGTERM, exit cleanly */
 	die(ERR_OK);
 }

@@ -12,11 +12,11 @@ struct mktimes_arg {
 };
 struct getbattery_arg {
 	const char *dir;
-	const char *n_present,
-		   *n_energy_design,
-		   *n_energy_now,
-		   *n_power_now,
-		   *n_status;
+	const char *present,
+		   *energy_max,
+		   *energy_now,
+		   *power_now,
+		   *status;
 	const char *(*status_txt);
 };
 struct getdiskusage_arg {
@@ -31,7 +31,7 @@ struct getnetwork_arg {
 };
 struct gettemperature_arg {
 	const char *dir;
-	const char *n_sensor;
+	const char *sensor;
 };
 
 /* widget-context structures */
@@ -83,7 +83,7 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 	struct getbattery_ctx *c = (struct getbattery_ctx *)ctx;
 
 	short status_idx;
-	long energy_design = -1,
+	long energy_max = -1,
 	     energy_now = -1,
 	     power_now = -1;
 
@@ -97,7 +97,7 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 	/* BAT: present */
 	{
 		char rbuf;
-		int fd_present = openat(c->fd_dir, s->n_present, O_RDONLY);
+		int fd_present = openat(c->fd_dir, s->present, O_RDONLY);
 		if (0 > fd_present) {
 			goto error;
 		}
@@ -110,31 +110,31 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 			return 11;
 		}
 	}
-	/* BAT: energy designed capacity */
+	/* BAT: energy max capacity */
 	{
 		char rbuf[32] = {0};
-		int fd_energy_design = openat(c->fd_dir,
-		                              s->n_energy_design,
+		int fd_energy_max = openat(c->fd_dir,
+		                              s->energy_max,
 		                              O_RDONLY);
-		if (0 > fd_energy_design) {
+		if (0 > fd_energy_max) {
 			goto error;
 		}
 
-		read(fd_energy_design, rbuf, COUNT(rbuf));
-		close(fd_energy_design);
+		read(fd_energy_max, rbuf, COUNT(rbuf));
+		close(fd_energy_max);
 
 		if (rbuf[COUNT(rbuf)-1] != '\0') {
 			goto error;
 		}
-		if (0 >= sscanf(rbuf, "%ld", &energy_design)) {
+		if (0 >= sscanf(rbuf, "%ld", &energy_max)) {
 			goto error;
 		}
 	}
-	/* BAT: energy remaining capacity */
+	/* BAT: energy available now */
 	{
 		char rbuf[32] = {0};
 		int fd_energy_now = openat(c->fd_dir,
-		                              s->n_energy_now,
+		                              s->energy_now,
 		                              O_RDONLY);
 		if (0 > fd_energy_now) {
 			goto error;
@@ -154,7 +154,7 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 	{
 		char rbuf[32] = {0};
 		int fd_power_now = openat(c->fd_dir,
-		                              s->n_power_now,
+		                              s->power_now,
 		                              O_RDONLY);
 		if (0 > fd_power_now) {
 			goto error;
@@ -174,7 +174,7 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 	{
 		char rbuf[32] = {0};
 		int fd_status = openat(c->fd_dir,
-		                              s->n_status,
+		                              s->status,
 		                              O_RDONLY);
 		if (0 > fd_status) {
 			goto error;
@@ -196,12 +196,12 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 			status_idx=0;
 	}
 
-	if (0 > energy_now || 0 > energy_design)
+	if (0 > energy_now || 0 > energy_max)
 		goto error;
 
 	int psize = snprintf(buf, buflen, "%s %.2f %.2f",
 	        s->status_txt[status_idx],
-	        ((float)energy_now / (float)energy_design) * 100.0,
+	        ((float)energy_now / (float)energy_max) * 100.0,
 	        (float)power_now / 1e6f);
 	if (psize >= buflen)
 		goto error;
@@ -440,7 +440,7 @@ ssize_t gettemperature(char *restrict buf, const size_t buflen, void *ctx, const
 	int psize;
 	{
 		char rbuf[21] = {0};
-		int fd_sensor = openat(c->fd_hwmon, s->n_sensor, O_RDONLY);
+		int fd_sensor = openat(c->fd_hwmon, s->sensor, O_RDONLY);
 		if (0 > fd_sensor)
 			goto error;
 
