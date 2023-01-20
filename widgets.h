@@ -17,7 +17,10 @@ struct getbattery_arg {
 		   *energy_now,
 		   *power_now,
 		   *status;
-	const char *(*status_txt);
+	const short status_match_count;
+	const char *(*status_match);
+	const char *(*status_output);
+	const char *status_undef;
 };
 struct getdiskusage_arg {
 	int mode; /* 0: file size; 1: fs free; 2: fs used/total; */
@@ -82,29 +85,25 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 	struct getbattery_arg *s = (struct getbattery_arg *)arg.v;
 	struct getbattery_ctx *c = (struct getbattery_ctx *)ctx;
 
-	short status_idx;
+	short status_index;
 	long energy_max = -1,
 	     energy_now = -1,
 	     power_now = -1;
 
 	/* Open battery directory if it wasn't */
-	if (c->fd_dir == 0)
+	if (c->fd_dir <= 0) {
 		c->fd_dir = open(s->dir, O_RDONLY|O_DIRECTORY);
-	if (0 > c->fd_dir) {
-		goto error;
+		if (0 > c->fd_dir) goto error;
 	}
 
 	/* BAT: present */
 	{
 		char rbuf;
-		int fd_present = openat(c->fd_dir, s->present, O_RDONLY);
-		if (0 > fd_present) {
-			goto error;
-		}
+		int fd = openat(c->fd_dir, s->present, O_RDONLY);
+		if (0 > fd) goto error;
 
-		read(fd_present, &rbuf, 1);
-		close(fd_present);
-
+		read(fd, &rbuf, 1);
+		close(fd);
 		if (rbuf != '1') {
 			sprintf(buf, "no battery");
 			return 11;
@@ -113,100 +112,76 @@ ssize_t getbattery(char *restrict buf, size_t buflen, void *ctx, const Arg arg)
 	/* BAT: energy max capacity */
 	{
 		char rbuf[32] = {0};
-		int fd_energy_max = openat(c->fd_dir,
-		                              s->energy_max,
-		                              O_RDONLY);
-		if (0 > fd_energy_max) {
-			goto error;
-		}
+		int fd = openat(c->fd_dir, s->energy_max, O_RDONLY);
+		if (0 > fd) goto error;
 
-		read(fd_energy_max, rbuf, COUNT(rbuf));
-		close(fd_energy_max);
-
-		if (rbuf[COUNT(rbuf)-1] != '\0') {
+		read(fd, rbuf, COUNT(rbuf));
+		close(fd);
+		if (rbuf[COUNT(rbuf)-1] != '\0'
+		|| 0 >= sscanf(rbuf, "%ld", &energy_max))
 			goto error;
-		}
-		if (0 >= sscanf(rbuf, "%ld", &energy_max)) {
-			goto error;
-		}
 	}
 	/* BAT: energy available now */
 	{
 		char rbuf[32] = {0};
-		int fd_energy_now = openat(c->fd_dir,
-		                              s->energy_now,
-		                              O_RDONLY);
-		if (0 > fd_energy_now) {
-			goto error;
-		}
+		int fd = openat(c->fd_dir, s->energy_now, O_RDONLY);
+		if (0 > fd) goto error;
 
-		read(fd_energy_now, rbuf, COUNT(rbuf));
-		close(fd_energy_now);
-
-		if (rbuf[COUNT(rbuf)-1] != '\0') {
+		read(fd, rbuf, COUNT(rbuf));
+		close(fd);
+		if (rbuf[COUNT(rbuf)-1] != '\0'
+		|| 0 >= sscanf(rbuf, "%ld", &energy_now))
 			goto error;
-		}
-		if (0 >= sscanf(rbuf, "%ld", &energy_now)) {
-			goto error;
-		}
 	}
 	/* BAT: current power consumption */
 	{
 		char rbuf[32] = {0};
-		int fd_power_now = openat(c->fd_dir,
-		                              s->power_now,
-		                              O_RDONLY);
-		if (0 > fd_power_now) {
-			goto error;
-		}
+		int fd = openat(c->fd_dir, s->power_now, O_RDONLY);
+		if (0 > fd) goto error;
 
-		read(fd_power_now, rbuf, COUNT(rbuf));
-		close(fd_power_now);
+		read(fd, rbuf, COUNT(rbuf));
+		close(fd);
 
-		if (rbuf[COUNT(rbuf)-1] != '\0') {
+		if (rbuf[COUNT(rbuf)-1] != '\0'
+		|| 0 >= sscanf(rbuf, "%ld", &power_now))
 			goto error;
-		}
-		if (0 >= sscanf(rbuf, "%ld", &power_now)) {
-			goto error;
-		}
 	}
 	/* BAT: current status of the battery */
 	{
 		char rbuf[32] = {0};
-		int fd_status = openat(c->fd_dir,
-		                              s->status,
-		                              O_RDONLY);
-		if (0 > fd_status) {
-			goto error;
-		}
+		int fd = openat(c->fd_dir, s->status, O_RDONLY);
+		if (0 > fd) goto error;
 
-		read(fd_status, rbuf, COUNT(rbuf));
-		close(fd_status);
+		read(fd, rbuf, COUNT(rbuf));
+		close(fd);
+		if (rbuf[COUNT(rbuf)-1] != '\0') goto error;
 
-		if (rbuf[COUNT(rbuf)-1] != '\0')
-			goto error;
-
-		if (!strcmp(rbuf,
-				"Discharging\n"))
-			status_idx=2;
-		else if (!strcmp(rbuf,
-				"Charging\n"))
-			status_idx=1;
-		else
-			status_idx=0;
+		for (status_index=0; s->status_match_count > status_index; ++status_index)
+			if (!strcmp(rbuf, s->status_match[status_index])) break;
+		if (status_index == s->status_match_count)
+			status_index = -1;
 	}
 
 	if (0 > energy_now || 0 > energy_max)
 		goto error;
 
-	int psize = snprintf(buf, buflen, "%s %.2f %.2f",
-	        s->status_txt[status_idx],
-	        ((float)energy_now / (float)energy_max) * 100.0,
-	        (float)power_now / 1e6f);
-	if (psize >= buflen)
-		goto error;
+	{
+		float battery_pct,
+		      drainage_watt;
+		const char *status_txt;
 
-	return (ssize_t)psize;
+		battery_pct = ((float)energy_now / (float)energy_max) * 100.0;
+		drainage_watt = (float)power_now / 1e6f;
+		status_txt = status_index < 0
+			? s->status_undef
+			: s->status_output[status_index];
+
+		int psize = snprintf(buf, buflen, "%s %.1f %.1f",
+				status_txt, battery_pct, drainage_watt);
+		if (psize >= buflen)
+			goto error;
+		return (ssize_t)psize;
+	}
 error:
 	return -1;
 }

@@ -18,11 +18,14 @@ static const struct getbattery_arg farg_power_BAT0 = {
 	.energy_now="energy_now",
 	.power_now="power_now",
 	.status="status",
-	.status_txt = (const char*[]) {
-	/* undefined   */ "?",
-	/* charging    */ "+",
-	/* discharging */ "-"
-	}
+	.status_match_count = 3,
+	.status_match = (const char*[]) {
+		"Discharging\n", "Charging\n", "Full\n"
+	},
+	.status_output = (const char*[]) {
+		"-", "+", "☻"
+	},
+	.status_undef = "?"
 };
 static const struct gettemperature_arg farg_temp_CPU = {
 	.dir="/sys/devices/platform/coretemp.0",
