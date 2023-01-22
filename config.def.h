@@ -1,3 +1,9 @@
+/* Compare this values with VERSION_MAJOR and VERSION_MINOR from `config.mk`.
+ * They are here not to piss you off but for that you didn't compile
+ * incompatible versions of `config.h` and the rest of the code. */
+#define CONFIG_VERSION_MAJOR 1
+#define CONFIG_VERSION_MINOR 3
+
 #define WIDGET_BUFLEN  32
 #define STATUS_BUFLEN  256
 
@@ -23,7 +29,7 @@ static const struct getbattery_arg farg_power_BAT0 = {
 		"Discharging\n", "Charging\n", "Full\n"
 	},
 	.status_output = (const char*[]) {
-		"-", "+", "☻"
+		"-", "+", "*"
 	},
 	.status_undef = "?"
 };

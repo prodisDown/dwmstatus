@@ -113,10 +113,10 @@ static char **widget_buf;
 
 /* Configuration, allows nested code to use variables above */
 #include "config.h"
-
-//UpdateCtx *(update_ctx[COUNT(update)]) = {0};
-//void *(widget_ctx[COUNT(widget)]) = {0};
-//char *(widget_buf[COUNT(widget)]) = {0};
+#if VERSION_MAJOR != CONFIG_VERSION_MAJOR \
+ || VERSION_MINOR != CONFIG_VERSION_MINOR
+#error "`config.h` has different API version from config.mk. Check your `config.h` for compatibility and change its version."
+#endif
 
 static void *ecalloc(size_t nmemb, size_t size)
 {
